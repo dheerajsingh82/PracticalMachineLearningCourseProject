@@ -1,0 +1,133 @@
+---
+title: "Practical Machine Learning Project Report"
+author: "Dheeraj Snngh"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Synopsis  of the project
+ 
+According to documentation available on website, Using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways, we will attempt to predict the way, they did the exercise. 
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.  
+
+## Loading the packages 
+```{r, cache = T}
+library(data.table)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(ggplot2)
+```
+
+### Download the Data
+
+```{r, cache = T}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "testing.csv")
+TrainDataRaw <- read.csv("training.csv")
+TestDataRaw <- read.csv("testing.csv")
+dim(TrainDataRaw)
+dim(TestDataRaw)
+
+```  
+
+Using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways, we will predict the manner in which they did the exercise. We have recieved above details from document provided on the website.
+
+### Data Processing 
+
+In this step, we will clean the data and get rid of observations with missing values as well as some meaningless variables.
+
+We see that both the test and training data sets have the same column dimensions, with only the last column differing in name. For our training data set the last column is the "classe" variable, which is the variable that predicts the manner in which the participants do excercise. From the dataset documentation, we get that five different fashions of activity are: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). For our testing set the last column is a problem id.
+
+In the plot, we can see that most activities are classified in class "A", which is performing the activity exactly as specified.
+
+```{r, cache = T}
+sum(complete.cases(TrainDataRaw))
+```
+
+In first, we remove columns that contain NA missing values.
+
+```{r, cache = T}
+TrainDataRaw <- TrainDataRaw[, colSums(is.na(TrainDataRaw)) == 0] 
+TestDataRaw <- TestDataRaw[, colSums(is.na(TestDataRaw)) == 0] 
+```  
+
+Next, we get rid of some columns that do not contribute much to the accelerometer measurements.
+
+```{r, cache = T}
+classe <- TrainDataRaw$classe
+trainRemove <- grepl("^X|timestamp|window", names(TrainDataRaw))
+TrainDataRaw <- TrainDataRaw[, !trainRemove]
+trainCleaned <- TrainDataRaw[, sapply(TrainDataRaw, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(TestDataRaw))
+TestDataRaw <- TestDataRaw[, !testRemove]
+testCleaned <- TestDataRaw[, sapply(TestDataRaw, is.numeric)]
+```
+
+Now, the cleaned training data set contains 19622 observations and 53 variables, while the testing data set contains 20 observations and 53 variables. The "classe" variable is still in the cleaned training set.
+
+### Creating Training and validation dataset
+Then, we can split, using caret pachage, the cleaned training set into a training data set (70%) and a validation data set (30%). We will use the validation data set to conduct cross validation in future steps.  
+
+```{r, cache = T}
+set.seed(22519) # For reproducibile purpose
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=F)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+## Data Modeling and Cross validation
+
+We fit a predictive model for activity recognition using **Random Forest** algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general. We will use **5-fold cross validation** when applying the algorithm.  
+
+```{r, cache = T}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+
+Then, we calculating the performance of the model on the validation data set.  
+
+```{r, cache = T}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+```
+
+# Calculating Out of Sample Error
+We know the accuracy from above, so let's calculate the sample error below.
+
+```{r, cache = T}
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+The out of sample error is always larger that the sample error, so we can easily estimate that the out of sample error will be larger than 0.6%.So, the estimated accuracy of the model is 99.42% and the estimated out-of-sample error is 0.58%.
+
+## Prediction of Test Data Set
+
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the `problem_id` column first.  
+
+```{r, cache = T}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+
+
+```  
+
+
+The resulting predictions for the 20 test values were:
+
+## Appendix: Figures
+
+1. Decision Tree Visualization
+```{r, cache = T}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel) # fast plot
+```
